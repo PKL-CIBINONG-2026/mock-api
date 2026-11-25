@@ -2,6 +2,7 @@
  * Studi Kasus 3: Manajemen Profil & Pengaturan Akun User — /api/v1/users
  */
 import { getAll, saveAll } from '../core/db.js';
+import { imageEndpoint, removeImageByUrl, IMAGE_ROUTES } from '../core/uploads.js';
 import {
   json, empty, badRequest, notFound, methodNotAllowed, paginate, nextId,
   isNonEmptyString, isPlainObject, checkPayload, checkPatch, checkBodyId, validationFailed, unprocessable,
@@ -39,7 +40,8 @@ function emailTaken(items, email, excludeId) {
 const emailTakenResponse = (email) =>
   unprocessable(`Email "${email}" sudah terdaftar`, { errors: [{ field: 'email', message: 'Email sudah dipakai user lain' }] });
 
-export async function handle({ method, params, query, body }) {
+export async function handle(ctx) {
+  const { method, params, query, body } = ctx;
   const items = await getAll(COLLECTION);
 
   if (params.length === 0) {
@@ -75,9 +77,17 @@ export async function handle({ method, params, query, body }) {
     return methodNotAllowed(['GET', 'HEAD', 'POST']);
   }
 
-  if (params.length > 1) return notFound('Endpoint tidak ditemukan');
+  const SUB = IMAGE_ROUTES[COLLECTION].sub;
+  if (params.length > 2 || (params.length === 2 && params[1] !== SUB)) return notFound('Endpoint tidak ditemukan');
 
   const id = params[0];
+
+  // Upload / hapus gambar: /:id/<sub>
+  if (params.length === 2) {
+    const imgIdx = items.findIndex((x) => x.id === id);
+    if (imgIdx === -1) return notFound(`Data dengan id "${id}" tidak ditemukan`);
+    return imageEndpoint(ctx, { collection: COLLECTION, items, idx: imgIdx });
+  }
   if (!['GET', 'PUT', 'PATCH', 'DELETE'].includes(method)) return methodNotAllowed(['GET', 'HEAD', 'PUT', 'PATCH', 'DELETE']);
   const idx = items.findIndex((u) => u.id === id);
   if (idx === -1) return notFound(`User dengan id "${id}" tidak ditemukan`);
@@ -103,6 +113,7 @@ export async function handle({ method, params, query, body }) {
     };
     items[idx] = replaced;
     await saveAll(COLLECTION, items);
+    if (existing.avatarUrl !== replaced.avatarUrl) await removeImageByUrl(existing.avatarUrl);
     return json(200, replaced);
   }
 
@@ -133,10 +144,12 @@ export async function handle({ method, params, query, body }) {
     };
     items[idx] = merged;
     await saveAll(COLLECTION, items);
+    if (existing.avatarUrl !== merged.avatarUrl) await removeImageByUrl(existing.avatarUrl);
     return json(200, merged);
   }
 
   items.splice(idx, 1);
   await saveAll(COLLECTION, items);
+  await removeImageByUrl(existing[IMAGE_ROUTES[COLLECTION].field]);
   return empty(204);
 }

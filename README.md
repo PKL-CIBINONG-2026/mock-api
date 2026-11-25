@@ -70,6 +70,31 @@ Data tersimpan di IndexedDB milik origin kamu (misal `http://localhost:5500`). R
 
 > Tombol **Copy Localhost SDK Snippet** di halaman Playground menyalin tag `<script>` dengan URL GitHub Pages yang aktif.
 
+## Upload gambar
+
+Setiap studi kasus punya endpoint upload gambar. Body **wajib** `FormData` dengan field `image` (PNG, JPEG, WEBP, GIF, maks 2 MB). Jangan set header `Content-Type` sendiri.
+
+| Kategori | Upload (`POST`) / hapus (`DELETE`) | Field yang terisi |
+|----------|-----------------------------------|-------------------|
+| Articles | `/api/v1/articles/:id/cover` | `coverImageUrl` |
+| Bookings | `/api/v1/bookings/:id/attachment` | `attachmentUrl` |
+| Users | `/api/v1/users/:id/avatar` | `avatarUrl` |
+| Products | `/api/v1/products/:id/image` | `imageUrl` |
+
+```js
+const formData = new FormData();
+formData.append('image', document.querySelector('#foto').files[0]);
+
+const res = await fetch(`${BASE_URL}/products/prd-401/image`, { method: 'POST', body: formData });
+const product = await res.json();               // 201, header Location = URL file
+document.querySelector('#preview').src = product.imageUrl;
+```
+
+- File disimpan di IndexedDB dan dilayani oleh `GET /api/v1/uploads/:fileId`.
+- Upload ulang mengganti gambar lama; `DELETE` sub-endpoint → `204` dan field menjadi `null`; menghapus data induk ikut menghapus gambarnya. `PUT` tidak mengubah field gambar.
+- Error: `400` field `image` tidak ada, `413` file > 2 MB, `415` bukan FormData / bukan gambar (juga jika FormData dikirim ke endpoint JSON).
+- Di localhost, SDK otomatis mengganti `<img src="https://mock-api.pkl.local/api/v1/uploads/…">` menjadi `blob:` URL supaya gambar tampil. Untuk pemakaian lain (misal CSS `background-image`), pakai `await PKLMockAPI.imageUrl(url)`.
+
 ## Aturan HTTP yang diterapkan
 
 | Status | Kapan |
@@ -80,6 +105,8 @@ Data tersimpan di IndexedDB milik origin kamu (misal `http://localhost:5500`). R
 | `400 Bad Request` | JSON tidak valid, body kosong, PUT kurang field wajib, PATCH dengan key tidak dikenal |
 | `404 Not Found` | ID tidak ditemukan / slug tersedia (HEAD) |
 | `405 Method Not Allowed` | Method tidak didukung di endpoint tersebut |
+| `413 Payload Too Large` | File upload lebih dari 2 MB |
+| `415 Unsupported Media Type` | Upload tanpa FormData / bukan gambar |
 | `409 Conflict` | Slug artikel / SKU produk duplikat, jadwal ruangan bentrok |
 | `422 Unprocessable Entity` | Validasi nilai gagal (email salah/duplikat, stok/harga negatif, `startTime >= endTime`) |
 
@@ -151,7 +178,8 @@ src/app.js               Registrasi SW & UI dokumentasi (hash router, Try it, Li
 src/docs-data.js         Konten dokumentasi 4 kategori (parameter, body, response)
 src/core/                db.js (IndexedDB), http.js (Response helper), router.js
 src/data/seeds.js        Data awal
-src/handlers/            4 handler studi kasus
+src/core/uploads.js      Helper upload gambar (validasi, simpan, hapus)
+src/handlers/            4 handler studi kasus + uploads.handler.js (GET file)
 ```
 
 > Catatan browser: Service Worker bertipe module didukung Chrome/Edge 91+, Safari 15+, dan Firefox versi terbaru. Jika SW tidak aktif (misal setelah hard reload), Playground otomatis memakai router secara langsung (*direct mode*).

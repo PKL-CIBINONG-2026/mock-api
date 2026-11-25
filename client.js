@@ -39,12 +39,61 @@ async function mockFetch(input, init) {
   return response;
 }
 
+/* ------------------------------------------------------------------ */
+/* Gambar upload: <img src="https://mock-api.pkl.local/api/v1/uploads/…">  */
+/* Browser tidak memakai fetch() untuk <img>, jadi src-nya kita ganti     */
+/* otomatis menjadi blob: URL dari IndexedDB.                             */
+/* ------------------------------------------------------------------ */
+const UPLOAD_PREFIXES = PREFIXES.map((p) => `${p}/uploads/`);
+const blobCache = new Map(); // mock URL → Promise<blob URL | null>
+
+const isUploadUrl = (url) => typeof url === 'string' && UPLOAD_PREFIXES.some((p) => url.startsWith(p));
+
+/** Ubah URL gambar mock menjadi blob: URL yang bisa dipakai di <img>, CSS, dll. */
+function imageUrl(url) {
+  if (!isUploadUrl(url)) return Promise.resolve(url);
+  if (!blobCache.has(url)) {
+    const job = handleApiRequest(new Request(url, { headers: { 'X-Mock-Delay': '0' } }))
+      .then(async (res) => (res.ok ? URL.createObjectURL(await res.blob()) : null))
+      .catch(() => null);
+    blobCache.set(url, job);
+    job.then((u) => { if (!u) blobCache.delete(url); });
+  }
+  return blobCache.get(url);
+}
+
+function patchImg(img) {
+  const src = img.getAttribute('src');
+  if (!isUploadUrl(src)) return;
+  img.dataset.mockSrc = src;
+  imageUrl(src).then((blobUrl) => {
+    if (blobUrl && img.getAttribute('src') === src) img.setAttribute('src', blobUrl);
+  });
+}
+
+function watchImages() {
+  document.querySelectorAll('img[src]').forEach(patchImg);
+  new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      if (m.type === 'attributes' && m.target.tagName === 'IMG') patchImg(m.target);
+      m.addedNodes.forEach((n) => {
+        if (n.nodeType !== 1) return;
+        if (n.tagName === 'IMG') patchImg(n);
+        n.querySelectorAll?.('img[src]').forEach(patchImg);
+      });
+    }
+  }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['src'] });
+}
+
 if (!window.__PKL_MOCK_API__) {
+  watchImages();
   window.fetch = mockFetch;
   window.__PKL_MOCK_API__ = true;
   window.PKLMockAPI = {
     baseUrl: MOCK_BASE_URL,
     originalFetch,
+    /** Ubah URL gambar upload menjadi blob: URL (otomatis untuk <img>). */
+    imageUrl,
     /** Kembalikan database lokal ke data seed awal. */
     reset: () => resetAll(),
   };

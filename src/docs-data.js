@@ -11,6 +11,8 @@ const R = {
   404: 'Not Found — id tidak ditemukan',
   409: 'Conflict — bentrok dengan data lain',
   422: 'Unprocessable Entity — validasi nilai gagal',
+  413: 'Payload Too Large — ukuran file lebih dari 2 MB',
+  415: 'Unsupported Media Type — bukan FormData / bukan gambar PNG, JPEG, WEBP, GIF',
 };
 const res = (...codes) => codes.map((c) => [c, R[c]]);
 const pg = [
@@ -36,6 +38,7 @@ export const CATEGORIES = [
       ['status', '"draft" | "published"', 'Status publikasi'],
       ['isPinned', 'boolean', 'Ditampilkan di atas'],
       ['views', 'number', 'Jumlah dilihat'],
+      ['coverImageUrl', 'string | null', 'URL gambar cover (diisi lewat upload)'],
       ['updatedAt', 'string (ISO)', 'Waktu update terakhir (dibuat server)'],
     ],
     endpoints: [
@@ -129,6 +132,7 @@ export const CATEGORIES = [
       ['participants', 'number', 'Jumlah peserta (> 0)'],
       ['status', '"confirmed" | "checked_in" | "cancelled"', 'Status reservasi'],
       ['notes', 'string | null', 'Catatan'],
+      ['attachmentUrl', 'string | null', 'URL lampiran gambar, misal foto denah/bukti (diisi lewat upload)'],
     ],
     endpoints: [
       {
@@ -208,7 +212,7 @@ export const CATEGORIES = [
       ['phone', 'string', '9–15 digit'],
       ['bio', 'string | null', 'Bio singkat'],
       ['address', 'string | null', 'Alamat'],
-      ['avatarUrl', 'string | null', 'URL foto profil'],
+      ['avatarUrl', 'string | null', 'URL foto profil (bisa diisi lewat upload avatar)'],
       ['preferences.theme', '"light" | "dark" | "system"', 'Tema aplikasi'],
       ['preferences.twoFactorEnabled', 'boolean', 'Autentikasi 2 langkah'],
       ['preferences.emailNotifications', 'boolean', 'Notifikasi email'],
@@ -284,6 +288,7 @@ export const CATEGORIES = [
       ['stock', 'number', 'Stok saat ini (bilangan bulat >= 0)'],
       ['minStock', 'number', 'Batas stok minimum'],
       ['supplier', 'string', 'Nama supplier'],
+      ['imageUrl', 'string | null', 'URL foto produk (diisi lewat upload)'],
     ],
     endpoints: [
       {
@@ -345,6 +350,35 @@ export const CATEGORIES = [
   },
 ];
 
+/* ---------------- Endpoint upload gambar (sama untuk ke-4 kategori) ---------------- */
+const UPLOADS = {
+  articles: { sub: 'cover', field: 'coverImageUrl', noun: 'cover artikel', id: 'art-101', delId: 'art-101' },
+  bookings: { sub: 'attachment', field: 'attachmentUrl', noun: 'lampiran reservasi (misal foto denah ruangan)', id: 'bkg-201', delId: 'bkg-201' },
+  users: { sub: 'avatar', field: 'avatarUrl', noun: 'foto avatar', id: 'usr-301', delId: 'usr-301' },
+  products: { sub: 'image', field: 'imageUrl', noun: 'foto produk', id: 'prd-401', delId: 'prd-401' },
+};
+
+for (const cat of CATEGORIES) {
+  const u = UPLOADS[cat.key];
+  const uploadEp = {
+    slug: `upload-${u.sub}`, method: 'POST', path: `/${cat.key}/:id/${u.sub}`, upload: true, imageField: u.field, title: `Upload ${u.noun.split(' (')[0]}`,
+    desc: `Upload ${u.noun}. Body **wajib** berupa \`FormData\` (multipart/form-data) dengan field \`image\` — **jangan** set header \`Content-Type\` sendiri, browser yang mengisinya. Response berisi data terbaru dengan \`${u.field}\` yang sudah terisi, dan header \`Location\` menunjuk ke file gambar.
+
+Upload ulang akan mengganti gambar lama (file lama ikut dihapus).`,
+    form: [{ name: 'image', type: 'File', required: true, desc: 'PNG, JPEG, WEBP, atau GIF. Maksimal 2 MB' }],
+    example: { url: `/${cat.key}/${u.id}/${u.sub}` },
+    responses: [[201, `Created — \`${u.field}\` terisi, header Location = URL file`], [400, 'Bad Request — field `image` tidak ada / file kosong'], [404, 'Not Found — id tidak ditemukan'], [413, 'Payload Too Large — file lebih dari 2 MB'], [415, 'Unsupported Media Type — bukan FormData atau bukan gambar']],
+  };
+  const deleteEp = {
+    slug: `delete-${u.sub}`, method: 'DELETE', path: `/${cat.key}/:id/${u.sub}`, title: `Hapus ${u.noun.split(' (')[0]}`,
+    desc: `Menghapus gambar dan mengubah \`${u.field}\` menjadi \`null\`. Response \`204\` tanpa body. Jika data belum punya gambar → \`404\`.`,
+    example: { url: `/${cat.key}/${u.delId}/${u.sub}` },
+    responses: [[204, 'No Content — gambar dihapus'], [404, 'Not Found — id tidak ditemukan / belum ada gambar']],
+  };
+  const delIdx = cat.endpoints.findIndex((e) => e.slug === 'delete');
+  cat.endpoints.splice(delIdx, 0, uploadEp, deleteEp);
+}
+
 export const STATUS_CODES = [
   [200, 'OK', 'GET, PUT, PATCH berhasil; HEAD ditemukan'],
   [201, 'Created', 'POST berhasil. Ada header `Location: /api/v1/<resource>/<id>`'],
@@ -353,5 +387,7 @@ export const STATUS_CODES = [
   [404, 'Not Found', 'ID tidak ditemukan / slug tersedia (HEAD)'],
   [405, 'Method Not Allowed', 'Method tidak didukung di endpoint tersebut'],
   [409, 'Conflict', 'Slug / SKU duplikat, jadwal ruangan bentrok'],
+  [413, 'Payload Too Large', 'File upload lebih dari 2 MB'],
+  [415, 'Unsupported Media Type', 'Upload tanpa FormData, file bukan gambar, atau FormData dikirim ke endpoint JSON'],
   [422, 'Unprocessable Entity', 'Validasi nilai gagal: email salah, stok negatif, startTime >= endTime'],
 ];

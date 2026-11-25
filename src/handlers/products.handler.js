@@ -2,6 +2,7 @@
  * Studi Kasus 4: Manajemen Inventaris & Stock Opname Gudang — /api/v1/products
  */
 import { getAll, saveAll } from '../core/db.js';
+import { imageEndpoint, removeImageByUrl, IMAGE_ROUTES } from '../core/uploads.js';
 import {
   json, empty, notFound, conflict, methodNotAllowed, paginate, nextId,
   isNonEmptyString, checkPayload, checkPatch, checkBodyId, validationFailed,
@@ -39,7 +40,8 @@ function skuConflict(items, sku, excludeId) {
   return dup ? conflict(`SKU "${sku}" sudah terdaftar pada produk ${dup.id}`, { field: 'sku', existingId: dup.id }) : null;
 }
 
-export async function handle({ method, params, query, body }) {
+export async function handle(ctx) {
+  const { method, params, query, body } = ctx;
   const items = await getAll(COLLECTION);
 
   if (params.length === 0) {
@@ -65,15 +67,24 @@ export async function handle({ method, params, query, body }) {
       if (dup) return dup;
       const product = { id: nextId(items, 'prd', 401) };
       for (const f of REQUIRED) product[f] = body[f];
+      product.imageUrl = null;
       await saveAll(COLLECTION, [...items, product]);
       return json(201, product, { Location: `${BASE}/${product.id}` });
     }
     return methodNotAllowed(['GET', 'HEAD', 'POST']);
   }
 
-  if (params.length > 1) return notFound('Endpoint tidak ditemukan');
+  const SUB = IMAGE_ROUTES[COLLECTION].sub;
+  if (params.length > 2 || (params.length === 2 && params[1] !== SUB)) return notFound('Endpoint tidak ditemukan');
 
   const id = params[0];
+
+  // Upload / hapus gambar: /:id/<sub>
+  if (params.length === 2) {
+    const imgIdx = items.findIndex((x) => x.id === id);
+    if (imgIdx === -1) return notFound(`Data dengan id "${id}" tidak ditemukan`);
+    return imageEndpoint(ctx, { collection: COLLECTION, items, idx: imgIdx });
+  }
   if (!['GET', 'PUT', 'PATCH', 'DELETE'].includes(method)) return methodNotAllowed(['GET', 'HEAD', 'PUT', 'PATCH', 'DELETE']);
   const idx = items.findIndex((p) => p.id === id);
   if (idx === -1) return notFound(`Produk dengan id "${id}" tidak ditemukan`);
@@ -90,6 +101,7 @@ export async function handle({ method, params, query, body }) {
     if (dup) return dup;
     const replaced = { id };
     for (const f of REQUIRED) replaced[f] = body[f];
+    replaced.imageUrl = existing.imageUrl ?? null;
     items[idx] = replaced;
     await saveAll(COLLECTION, items);
     return json(200, replaced);
@@ -108,5 +120,6 @@ export async function handle({ method, params, query, body }) {
 
   items.splice(idx, 1);
   await saveAll(COLLECTION, items);
+  await removeImageByUrl(existing[IMAGE_ROUTES[COLLECTION].field]);
   return empty(204);
 }

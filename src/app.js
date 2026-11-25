@@ -227,6 +227,28 @@ const totalPages = Math.ceil(total / 2);`, 'js')}
     <h2>Simulasi latency</h2>
     <div class="prose"><p>Setiap response diberi delay acak <strong>300–500 ms</strong> supaya kamu terbiasa membuat <em>loading state</em>. Kirim header <code>X-Mock-Delay: 0</code> untuk mematikannya, atau misal <code>X-Mock-Delay: 2000</code> untuk delay 2 detik.</p></div>
 
+    <h2>Upload gambar</h2>
+    <div class="prose"><p>Setiap kategori punya endpoint upload gambar dengan body <code>FormData</code> (field <code>image</code>, PNG/JPEG/WEBP/GIF, maks 2 MB):</p></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Kategori</th><th>Endpoint upload</th><th>Field yang terisi</th></tr></thead>
+      <tbody>
+        <tr><td class="name">Articles</td><td class="name">POST /articles/:id/cover</td><td class="type">coverImageUrl</td></tr>
+        <tr><td class="name">Bookings</td><td class="name">POST /bookings/:id/attachment</td><td class="type">attachmentUrl</td></tr>
+        <tr><td class="name">Users</td><td class="name">POST /users/:id/avatar</td><td class="type">avatarUrl</td></tr>
+        <tr><td class="name">Products</td><td class="name">POST /products/:id/image</td><td class="type">imageUrl</td></tr>
+      </tbody>
+    </table></div>
+    <div class="prose" style="margin-top:12px"><p>File disimpan di IndexedDB dan bisa diambil lewat <code>GET /api/v1/uploads/:fileId</code> (URL lengkapnya ada di field gambar dan header <code>Location</code>). Di localhost, SDK otomatis membuat <code>&lt;img src="https://mock-api.pkl.local/api/v1/uploads/…"&gt;</code> bisa tampil.</p></div>
+    ${codePanel('JavaScript', `const formData = new FormData();
+formData.append('image', document.querySelector('#foto').files[0]);
+
+const res = await fetch(\`\${BASE_URL}/products/prd-401/image\`, {
+  method: 'POST',
+  body: formData, // jangan set Content-Type, browser yang mengisi boundary
+});
+const product = await res.json();
+document.querySelector('#preview').src = product.imageUrl;`, 'js')}
+
     <h2>Format error</h2>
     ${jsonPanel('Contoh response 400', { error: 'Bad Request', status: 400, message: 'Field wajib belum lengkap: slug, status', details: { missingFields: ['slug', 'status'], requiredFields: ['title', 'slug', 'content', 'category', 'tags', 'status', 'isPinned'] } })}
     ${pager({ href: '#/quickstart', label: 'Mulai di localhost' }, { href: `#/${CATEGORIES[0].key}`, label: CATEGORIES[0].name })}
@@ -275,6 +297,7 @@ function pageEndpoint(cat, ep) {
 
         ${pathParams.length ? `<h3>Path parameter</h3>${fieldTable(pathParams.map((x) => ({ ...x, required: true })), true)}` : ''}
         ${ep.query ? `<h3>Query parameter</h3>${fieldTable(ep.query, true)}` : ''}
+        ${ep.form ? `<h3>Request body <span class="pill">multipart/form-data</span></h3>${fieldTable(ep.form, true)}` : ''}
         ${ep.body ? `<h3>Request body <span class="pill">application/json</span></h3>${fieldTable(ep.body, true)}` : ''}
 
         <h3>Response</h3>
@@ -336,7 +359,8 @@ function tryPanel(ep) {
     <div class="panel-head"><span class="title"><i class="ti ti-bolt" aria-hidden="true"></i> Try it</span><button class="mini-btn" id="try-reset">Reset contoh</button></div>
     <div class="try-body">
       <div class="url-row"><span class="m m-${ep.method}">${ep.method}</span><input id="try-url" spellcheck="false" value="${esc(API + ep.example.url)}" aria-label="URL" /></div>
-      ${hasBody ? `<div class="try-label"><span>Body (JSON)</span><button class="mini-btn" id="try-format">Format</button></div>
+      ${ep.upload ? uploadField() : ''}
+      ${hasBody && !ep.upload ? `<div class="try-label"><span>Body (JSON)</span><button class="mini-btn" id="try-format">Format</button></div>
       <textarea id="try-body" spellcheck="false">${esc(JSON.stringify(ep.example.body, null, 2))}</textarea>` : ''}
       <div class="try-actions">
         <label class="check"><input type="checkbox" id="try-delay" checked /> Simulasi latency</label>
@@ -350,7 +374,79 @@ function tryPanel(ep) {
   </div>`;
 }
 
+function uploadField() {
+  return `<div class="try-label"><span>Body (FormData) · field <code>image</code></span><button class="mini-btn" id="try-sample">Pakai gambar contoh</button></div>
+      <label class="dropzone" id="dropzone">
+        <input type="file" id="try-file" accept="image/png,image/jpeg,image/webp,image/gif" />
+        <img id="try-preview" alt="" hidden />
+        <span class="dz-text" id="dz-text"></span>
+      </label>`;
+}
+
+const DZ_EMPTY = '<i class="ti ti-photo-up" aria-hidden="true"></i><b>Pilih atau seret gambar ke sini</b><small>PNG, JPEG, WEBP, GIF · maks 2 MB</small>';
+
+/** Buat gambar PNG contoh lewat canvas (untuk mencoba upload tanpa menyiapkan file). */
+function makeSampleImage(label) {
+  const c = document.createElement('canvas');
+  c.width = 480; c.height = 300;
+  const g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 480, 300);
+  grad.addColorStop(0, '#6366f1'); grad.addColorStop(1, '#a855f7');
+  g.fillStyle = grad; g.fillRect(0, 0, 480, 300);
+  g.fillStyle = 'rgba(255,255,255,.15)';
+  for (let i = 0; i < 6; i++) { g.beginPath(); g.arc(60 + i * 80, 240 - (i % 2) * 60, 30 + i * 6, 0, Math.PI * 2); g.fill(); }
+  g.fillStyle = '#fff'; g.textAlign = 'center';
+  g.font = '700 30px Inter, system-ui, sans-serif'; g.fillText(label, 240, 140);
+  g.font = '500 16px "JetBrains Mono", monospace'; g.fillText(new Date().toLocaleTimeString('id-ID'), 240, 175);
+  return new Promise((r) => c.toBlob((b) => r(new File([b], `contoh-${Date.now()}.png`, { type: 'image/png' })), 'image/png'));
+}
+
+let selectedFile = null;
+
+function setSelectedFile(file) {
+  selectedFile = file || null;
+  const img = $('#try-preview');
+  const text = $('#dz-text');
+  if (!img) return;
+  if (img.src) URL.revokeObjectURL(img.src);
+  if (selectedFile) {
+    img.src = URL.createObjectURL(selectedFile);
+    img.hidden = false;
+    text.innerHTML = `<b>${esc(selectedFile.name)}</b><small>${esc(selectedFile.type || 'unknown')} · ${(selectedFile.size / 1024).toFixed(1)} KB · klik untuk ganti</small>`;
+  } else {
+    img.hidden = true;
+    img.removeAttribute('src');
+    text.innerHTML = DZ_EMPTY;
+  }
+}
+
+function uploadSnippet(ep, mode) {
+  const path = ep.example.url;
+  const url = mode === 'sdk' ? '`${BASE_URL}' + path + '`' : `'${API}${path}'`;
+  return [
+    '<!-- HTML -->',
+    '<input type="file" id="foto" accept="image/*" />',
+    '<img id="preview" />',
+    '',
+    ...(mode === 'sdk' ? [`const BASE_URL = '${MOCK_BASE}';`] : []),
+    "const file = document.querySelector('#foto').files[0];",
+    '',
+    'const formData = new FormData();',
+    "formData.append('image', file);",
+    '',
+    `const res = await fetch(${url}, {`,
+    "  method: 'POST',",
+    '  body: formData, // JANGAN set header Content-Type sendiri',
+    '});',
+    'const data = await res.json();',
+    'if (!res.ok) throw new Error(data.message);',
+    '',
+    `document.querySelector('#preview').src = data.${ep.imageField};`,
+  ].join('\n');
+}
+
 function snippetFor(ep, base, mode) {
+  if (ep.upload) return uploadSnippet(ep, mode);
   const path = ep.example.url;
   const lines = [];
   if (mode === 'sdk') lines.push(`const BASE_URL = '${base}';`, '');
@@ -412,7 +508,11 @@ async function refreshDB() {
     return;
   }
   const cols = [...new Set(rows.flatMap((r) => Object.keys(r)))];
-  const cell = (v) => (v === null || v === undefined ? '<td class="null">null</td>' : `<td>${esc(typeof v === 'object' ? JSON.stringify(v) : v)}</td>`);
+  const cell = (v) => {
+    if (v === null || v === undefined) return '<td class="null">null</td>';
+    if (isUploadUrl(v)) return `<td><a href="${esc(v)}" target="_blank" rel="noopener" title="${esc(v)}"><img class="thumb" src="${esc(v)}" alt="" /></a></td>`;
+    return `<td>${esc(typeof v === 'object' ? JSON.stringify(v) : v)}</td>`;
+  };
   table.innerHTML =
     `<thead><tr>${cols.map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead>` +
     `<tbody>${rows.map((r) => `<tr class="${r.id === lastChangedId ? 'flash' : ''}">${cols.map((c) => cell(r[c])).join('')}</tr>`).join('')}</tbody>`;
@@ -430,7 +530,11 @@ async function sendTry(ep) {
   const headers = {};
   if (!$('#try-delay').checked) headers['X-Mock-Delay'] = '0';
   const init = { method: ep.method, headers };
-  if ($('#try-body')) { headers['Content-Type'] = 'application/json'; init.body = $('#try-body').value; }
+  if (ep.upload) {
+    const fd = new FormData();
+    if (selectedFile) fd.append('image', selectedFile);
+    init.body = fd; // Content-Type multipart diisi otomatis oleh browser
+  } else if ($('#try-body')) { headers['Content-Type'] = 'application/json'; init.body = $('#try-body').value; }
 
   btn.disabled = true;
   btn.innerHTML = '<i class="ti ti-loader-2 spin" aria-hidden="true"></i> Loading…';
@@ -439,8 +543,10 @@ async function sendTry(ep) {
   try {
     const res = swActive ? await fetch(url, init) : await handleApiRequest(new Request(url, init));
     const ms = Math.round(performance.now() - t0);
-    const text = ep.method === 'HEAD' ? '' : await res.text();
-    renderResponse(res, text, ms);
+    const isImage = (res.headers.get('Content-Type') || '').startsWith('image/');
+    const blob = isImage ? await res.blob() : null;
+    const text = ep.method === 'HEAD' || isImage ? '' : await res.text();
+    renderResponse(res, text, ms, blob);
     if (res.ok && MUTATING.includes(ep.method)) {
       try { lastChangedId = JSON.parse(text).id ?? null; } catch { lastChangedId = null; }
       await refreshDB();
@@ -454,14 +560,23 @@ async function sendTry(ep) {
   }
 }
 
-function renderResponse(res, text, ms) {
+const IMAGE_FIELDS = ['coverImageUrl', 'attachmentUrl', 'avatarUrl', 'imageUrl'];
+const isUploadUrl = (v) => typeof v === 'string' && v.includes('/api/v1/uploads/');
+
+function renderResponse(res, text, ms, blob) {
   $('#resp-meta').innerHTML = `<span class="code-status ${statusClass(res.status)}">${res.status} ${esc(res.statusText)}</span><span class="time">${ms} ms${swActive ? '' : ' · direct'}</span>`;
   const show = ['content-type', 'x-total-count', 'location', 'allow'];
   const headers = [...res.headers.entries()].filter(([k]) => show.includes(k));
   let body;
-  if (!text) body = `<div class="resp-empty">Body kosong (<code>null</code>)${res.status === 204 ? ' — inilah kenapa DELETE tidak boleh memanggil <code>res.json()</code>' : ''}</div>`;
+  if (blob) body = `<div class="resp-image"><img src="${URL.createObjectURL(blob)}" alt="Response gambar" /></div>`;
+  else if (!text) body = `<div class="resp-empty">Body kosong (<code>null</code>)${res.status === 204 ? ' — inilah kenapa DELETE tidak boleh memanggil <code>res.json()</code>' : ''}</div>`;
   else {
-    try { body = `<pre>${highlightJson(JSON.stringify(JSON.parse(text), null, 2))}</pre>`; }
+    try {
+      const data = JSON.parse(text);
+      const imgs = data && !Array.isArray(data) ? IMAGE_FIELDS.filter((f) => isUploadUrl(data[f])) : [];
+      const preview = imgs.map((f) => `<figure class="resp-image"><img src="${esc(data[f])}" alt="${f}" /><figcaption>${f}</figcaption></figure>`).join('');
+      body = preview + `<pre>${highlightJson(JSON.stringify(data, null, 2))}</pre>`;
+    }
     catch { body = `<pre>${esc(text)}</pre>`; }
   }
   $('#resp-out').innerHTML =
@@ -472,7 +587,18 @@ function bindEndpointPage(ep) {
   const resetExample = () => {
     $('#try-url').value = API + ep.example.url;
     if ($('#try-body')) $('#try-body').value = JSON.stringify(ep.example.body, null, 2);
+    if (ep.upload) { $('#try-file').value = ''; setSelectedFile(null); }
   };
+  if (ep.upload) {
+    selectedFile = null;
+    $('#dz-text').innerHTML = DZ_EMPTY;
+    $('#try-file').addEventListener('change', (e) => setSelectedFile(e.target.files[0]));
+    $('#try-sample').addEventListener('click', async () => setSelectedFile(await makeSampleImage(ep.title)));
+    const dz = $('#dropzone');
+    dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('over'); });
+    dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+    dz.addEventListener('drop', (e) => { e.preventDefault(); dz.classList.remove('over'); setSelectedFile(e.dataTransfer.files[0]); });
+  }
   $('#try-send').addEventListener('click', () => sendTry(ep));
   $('#try-url').addEventListener('keydown', (e) => e.key === 'Enter' && sendTry(ep));
   $('#try-body')?.addEventListener('keydown', (e) => e.key === 'Enter' && (e.ctrlKey || e.metaKey) && sendTry(ep));

@@ -8,8 +8,9 @@
 import { seeds } from '../data/seeds.js';
 
 const DB_NAME = 'pkl-mock-api';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = 'collections';
+const FILES = 'files';
 
 export const COLLECTIONS = Object.keys(seeds);
 
@@ -22,6 +23,7 @@ function openDB() {
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+      if (!db.objectStoreNames.contains(FILES)) db.createObjectStore(FILES);
     };
     req.onsuccess = () => {
       const db = req.result;
@@ -39,11 +41,11 @@ function openDB() {
   return dbPromise;
 }
 
-async function run(mode, fn) {
+async function run(mode, fn, storeName = STORE) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, mode);
-    const store = tx.objectStore(STORE);
+    const tx = db.transaction(storeName, mode);
+    const store = tx.objectStore(storeName);
     let result;
     const req = fn(store);
     if (req) req.onsuccess = () => (result = req.result);
@@ -92,10 +94,26 @@ export async function reset(name) {
 export async function resetAll() {
   const db = await openDB();
   await new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readwrite');
+    const tx = db.transaction([STORE, FILES], 'readwrite');
     const store = tx.objectStore(STORE);
     for (const name of COLLECTIONS) store.put(clone(seeds[name]), name);
+    tx.objectStore(FILES).clear();
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
+}
+
+/* ---------------- File storage (gambar upload) ---------------- */
+
+/** Simpan file: { blob, name, type, size, createdAt }. */
+export async function putFile(id, record) {
+  await run('readwrite', (s) => s.put(record, id), FILES);
+}
+
+export async function getFile(id) {
+  return run('readonly', (s) => s.get(id), FILES);
+}
+
+export async function deleteFile(id) {
+  await run('readwrite', (s) => s.delete(id), FILES);
 }

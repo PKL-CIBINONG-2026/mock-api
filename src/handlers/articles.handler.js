@@ -2,6 +2,7 @@
  * Studi Kasus 1: CMS Artikel & Blog — /api/v1/articles
  */
 import { getAll, saveAll } from '../core/db.js';
+import { imageEndpoint, removeImageByUrl, IMAGE_ROUTES } from '../core/uploads.js';
 import {
   json, empty, notFound, conflict, methodNotAllowed, paginate, nextId,
   isNonEmptyString, checkPayload, checkPatch, checkBodyId, validationFailed,
@@ -40,7 +41,8 @@ function validate(data) {
 
 const now = () => new Date().toISOString();
 
-export async function handle({ method, params, query, body }) {
+export async function handle(ctx) {
+  const { method, params, query, body } = ctx;
   const items = await getAll(COLLECTION);
 
   // HEAD /articles/check-slug/:slug
@@ -79,6 +81,7 @@ export async function handle({ method, params, query, body }) {
         status: 'draft',
         isPinned: false,
         views: 0,
+        coverImageUrl: null,
         updatedAt: now(),
       };
       await saveAll(COLLECTION, [...items, article]);
@@ -87,10 +90,17 @@ export async function handle({ method, params, query, body }) {
     return methodNotAllowed(['GET', 'HEAD', 'POST']);
   }
 
-  if (params.length > 1) return notFound('Endpoint tidak ditemukan');
+  const SUB = IMAGE_ROUTES[COLLECTION].sub;
+  if (params.length > 2 || (params.length === 2 && params[1] !== SUB)) return notFound('Endpoint tidak ditemukan');
 
-  // Item: /articles/:id
   const id = params[0];
+
+  // Upload / hapus gambar: /:id/<sub>
+  if (params.length === 2) {
+    const imgIdx = items.findIndex((x) => x.id === id);
+    if (imgIdx === -1) return notFound(`Data dengan id "${id}" tidak ditemukan`);
+    return imageEndpoint(ctx, { collection: COLLECTION, items, idx: imgIdx });
+  }
   if (!['GET', 'PUT', 'PATCH', 'DELETE'].includes(method)) return methodNotAllowed(['GET', 'HEAD', 'PUT', 'PATCH', 'DELETE']);
   const idx = items.findIndex((a) => a.id === id);
   if (idx === -1) return notFound(`Artikel dengan id "${id}" tidak ditemukan`);
@@ -115,6 +125,7 @@ export async function handle({ method, params, query, body }) {
       status: body.status,
       isPinned: body.isPinned,
       views: existing.views,
+      coverImageUrl: existing.coverImageUrl ?? null,
       updatedAt: now(),
     };
     items[idx] = replaced;
@@ -136,5 +147,6 @@ export async function handle({ method, params, query, body }) {
   // DELETE
   items.splice(idx, 1);
   await saveAll(COLLECTION, items);
+  await removeImageByUrl(existing[IMAGE_ROUTES[COLLECTION].field]);
   return empty(204);
 }
